@@ -28,13 +28,13 @@ Non esiste alcuno storico delle operazioni: VaultLite è stateless per design.
 
 ## 3. Endpoint esposti
 
-| # | Metodo | Path                      | Descrizione                                              |
-|---|--------|---------------------------|-----------------------------------------------------------|
-| 1 | POST   | `/api/crypto/encrypt`     | Cifra un testo in chiaro con la chiave fornita             |
-| 2 | POST   | `/api/crypto/decrypt`     | Decifra un testo cifrato con la chiave fornita             |
-| 3 | GET    | `/api/crypto/generate-key`| Genera una nuova chiave AES-256 casuale (Base64, 32 byte)  |
+| # | Metodo | Path        | Descrizione                                              |
+|---|--------|-------------|-----------------------------------------------------------|
+| 1 | POST   | `/encrypt`  | Cifra un testo in chiaro con la chiave fornita             |
+| 2 | POST   | `/decrypt`  | Decifra un testo cifrato con la chiave fornita             |
+| 3 | GET    | `/key`      | Genera una nuova chiave AES-256 casuale (Base64, 32 byte)  |
 
-### Request/response — `/api/crypto/encrypt` e `/api/crypto/decrypt`
+### Request/response — `/encrypt` e `/decrypt`
 
 Request:
 ```json
@@ -58,7 +58,7 @@ Response di errore (400) — chiave non valida, valore non nel formato atteso, o
 }
 ```
 
-### Response — `/api/crypto/generate-key`
+### Response — `/key`
 
 ```json
 {
@@ -68,41 +68,49 @@ Response di errore (400) — chiave non valida, valore non nel formato atteso, o
 
 ## 4. Implementazione con Minimal API
 
-Un unico endpoint group, nessun controller MVC.
+Un unico endpoint group (path root, nessun prefisso), nessun controller MVC. Nessun try/catch negli endpoint: la logica di dominio lancia `CryptoException` con un messaggio già sicuro da esporre, e un exception handler centralizzato (sezione 4.1) lo traduce nella risposta HTTP.
 
 ```csharp
-var api = app.MapGroup("/api/crypto");
+var api = app.MapGroup("").RequireRateLimiting(RateLimitingSetup.CryptoPolicy);
 
-api.MapGet("/generate-key", () => Results.Ok(new { key = AesGcmCrypto.GenerateKey() }));
+api.MapGet("/key", () => Results.Ok(new { key = AesGcmCrypto.GenerateKey() }));
 
 api.MapPost("/encrypt", (CryptoRequest request) =>
-{
-    try
-    {
-        var result = AesGcmCrypto.Encrypt(request.Key, request.Value);
-        return Results.Ok(new { result });
-    }
-    catch (ArgumentException ex)
-    {
-        return Results.BadRequest(new { error = ex.Message });
-    }
-});
+    Results.Ok(new { result = AesGcmCrypto.Encrypt(request.Key, request.Value) }));
 
 api.MapPost("/decrypt", (CryptoRequest request) =>
-{
-    try
-    {
-        var result = AesGcmCrypto.Decrypt(request.Key, request.Value);
-        return Results.Ok(new { result });
-    }
-    catch (Exception ex) when (ex is ArgumentException or FormatException or CryptographicException)
-    {
-        return Results.BadRequest(new { error = "Impossibile decifrare: chiave o valore non validi." });
-    }
-});
+    Results.Ok(new { result = AesGcmCrypto.Decrypt(request.Key, request.Value) }));
 
 record CryptoRequest(string Key, string Value);
 ```
+
+### 4.1 Gestione errori centralizzata
+
+Tutte le eccezioni attraversano un unico exception handler globale (`app.UseExceptionHandler(...)`), registrato per primo nella pipeline:
+
+```csharp
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        var error = context.Features.Get<IExceptionHandlerFeature>()?.Error;
+
+        var (statusCode, message) = error switch
+        {
+            CryptoException ex => (StatusCodes.Status400BadRequest, ex.Message),
+            BadHttpRequestException => (StatusCodes.Status400BadRequest,
+                "Richiesta non valida: body mancante o non in formato JSON corretto."),
+            _ => (StatusCodes.Status500InternalServerError, "Errore interno del server.")
+        };
+
+        context.Response.StatusCode = statusCode;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = message }));
+    });
+});
+```
+
+`CryptoException` è l'unico tipo di eccezione che la logica crypto può lanciare: su `/decrypt`, qualunque causa di fallimento (chiave errata, Base64 invalido, testo manomesso) viene volutamente collassata in un unico messaggio generico, per non fornire a un chiamante malevolo un oracolo su quale parte dell'input sia sbagliata.
 
 ## 5. Crittografia
 
@@ -189,7 +197,7 @@ Pagina statica singola (`wwwroot/index.html`, vanilla JS, nessun framework), ser
 
 Funzionalità della pagina:
 
-- campo per la chiave AES, con pulsante "Genera nuova chiave" (chiama `/api/crypto/generate-key`);
+- campo per la chiave AES, con pulsante "Genera nuova chiave" (chiama `/key`);
 - textarea di input (testo in chiaro o cifrato) e textarea di output, con pulsante "Copia risultato";
 - pulsante opzionale "Ricorda su questo browser": salva la chiave in `localStorage`, **mai inviata altrove** se non verso l'API stessa.
 
@@ -197,11 +205,18 @@ Funzionalità della pagina:
 
 ```
 VaultLite.Api/
-  Program.cs              -> Bootstrap, endpoint map, middleware pipeline
+  Program.cs                        -> bootstrap: wiring dei moduli, pipeline dei middleware
+  Bootstrap/
+    RateLimitingSetup.cs            -> policy di rate limiting (30 req/min per IP)
+    ErrorHandlingSetup.cs           -> exception handler centralizzato -> risposta HTTP
+    SwaggerSetup.cs                 -> OpenAPI + Swagger UI
+    CryptoEndpoints.cs              -> route REST (/key, /encrypt, /decrypt)
   Crypto/
-    AesGcmCrypto.cs        -> Encrypt / Decrypt / GenerateKey
+    AesGcmCrypto.cs                 -> Encrypt / Decrypt / GenerateKey
+    CryptoException.cs              -> unica eccezione "safe to expose" dal dominio crypto
+    CryptoRequest.cs                -> record del body JSON (Key, Value)
   wwwroot/
-    index.html             -> Frontend statico
+    index.html                      -> Frontend statico
 ```
 
 ## 8. Stack tecnologico
@@ -226,7 +241,7 @@ Non necessario: frontend e API sono servite dalla stessa origine.
 
 ## 10. Rate limiting
 
-Per proteggere la quota di CPU/giorno del piano free (sezione 11) da un uso anomalo o automatizzato, dato che l'API è pubblica e non richiede autenticazione, è applicato un rate limiting **per indirizzo IP** sul gruppo `/api/crypto`, tramite il middleware nativo di ASP.NET Core (`Microsoft.AspNetCore.RateLimiting`, incluso nel framework, nessun pacchetto NuGet aggiuntivo).
+Per proteggere la quota di CPU/giorno del piano free (sezione 11) da un uso anomalo o automatizzato, dato che l'API è pubblica e non richiede autenticazione, è applicato un rate limiting **per indirizzo IP** su tutti gli endpoint crypto, tramite il middleware nativo di ASP.NET Core (`Microsoft.AspNetCore.RateLimiting`, incluso nel framework, nessun pacchetto NuGet aggiuntivo).
 
 - Algoritmo: **fixed window**, partizionato per IP del chiamante.
 - Limite: **30 richieste al minuto** per IP — ampiamente sufficiente per uso interattivo (personale o di un collega), ma sufficiente a bloccare rapidamente uno script che martella l'endpoint.
@@ -258,7 +273,7 @@ builder.Services.AddRateLimiter(options =>
 
 app.UseRateLimiter();
 
-var api = app.MapGroup("/api/crypto").RequireRateLimiting("crypto");
+var api = app.MapGroup("").RequireRateLimiting("crypto");
 ```
 
 ## 11. Deployment

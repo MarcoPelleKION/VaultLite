@@ -2,13 +2,8 @@ namespace VaultLite.Api.Bootstrap;
 
 public static class SwaggerSetup
 {
-    public static void UseDevelopmentApiDocs(this WebApplication app)
+    public static void UseApiDocs(this WebApplication app)
     {
-        if (!app.Environment.IsDevelopment())
-        {
-            return;
-        }
-
         app.MapOpenApi();
         app.UseSwaggerUI(options =>
         {

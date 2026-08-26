@@ -6,9 +6,9 @@ public static class CryptoEndpoints
 {
     public static void MapCryptoEndpoints(this WebApplication app)
     {
-        var api = app.MapGroup("/api/crypto").RequireRateLimiting(RateLimitingSetup.CryptoPolicy);
+        var api = app.MapGroup("").RequireRateLimiting(RateLimitingSetup.CryptoPolicy);
 
-        api.MapGet("/generate-key", () => Results.Ok(new { key = AesGcmCrypto.GenerateKey() }));
+        api.MapGet("/key", () => Results.Ok(new { key = AesGcmCrypto.GenerateKey() }));
 
         api.MapPost("/encrypt", (CryptoRequest request) =>
             Results.Ok(new { result = AesGcmCrypto.Encrypt(request.Key, request.Value) }));
