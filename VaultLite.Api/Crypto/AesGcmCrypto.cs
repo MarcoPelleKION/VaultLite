@@ -1,4 +1,4 @@
-﻿using System.Security.Cryptography;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace VaultLite.Api.Crypto;
@@ -15,6 +15,9 @@ public static class AesGcmCrypto
     public static string Encrypt(string keyBase64, string plainText)
     {
         var key = DecodeKey(keyBase64);
+        if (plainText is null)
+            throw new CryptoException("Testo in chiaro mancante.");
+
         var plainBytes = Encoding.UTF8.GetBytes(plainText);
 
         var nonce = RandomNumberGenerator.GetBytes(NonceSizeBytes);
@@ -34,33 +37,46 @@ public static class AesGcmCrypto
 
     public static string Decrypt(string keyBase64, string cipherTextBase64)
     {
-        var key = DecodeKey(keyBase64);
-        var raw = Convert.FromBase64String(cipherTextBase64);
-        if (raw.Length < NonceSizeBytes + TagSizeBytes)
-            throw new CryptographicException("Valore cifrato non valido: lunghezza insufficiente.");
+        // Qualsiasi causa di fallimento (chiave errata, base64 invalido, testo manomesso)
+        // viene volutamente collassata in un unico messaggio generico, per non offrire
+        // a un chiamante malevolo un oracolo su quale parte dell'input sia sbagliata.
+        try
+        {
+            var key = DecodeKey(keyBase64);
+            if (cipherTextBase64 is null)
+                throw new FormatException();
 
-        var nonce = raw[..NonceSizeBytes];
-        var tag = raw[^TagSizeBytes..];
-        var cipherText = raw[NonceSizeBytes..^TagSizeBytes];
+            var raw = Convert.FromBase64String(cipherTextBase64);
+            if (raw.Length < NonceSizeBytes + TagSizeBytes)
+                throw new CryptographicException();
 
-        var plainBytes = new byte[cipherText.Length];
-        using var aes = new AesGcm(key, TagSizeBytes);
-        aes.Decrypt(nonce, cipherText, tag, plainBytes);
+            var nonce = raw[..NonceSizeBytes];
+            var tag = raw[^TagSizeBytes..];
+            var cipherText = raw[NonceSizeBytes..^TagSizeBytes];
 
-        return Encoding.UTF8.GetString(plainBytes);
+            var plainBytes = new byte[cipherText.Length];
+            using var aes = new AesGcm(key, TagSizeBytes);
+            aes.Decrypt(nonce, cipherText, tag, plainBytes);
+
+            return Encoding.UTF8.GetString(plainBytes);
+        }
+        catch (Exception ex) when (ex is CryptoException or FormatException or CryptographicException)
+        {
+            throw new CryptoException("Impossibile decifrare: chiave o valore non validi.");
+        }
     }
 
     private static byte[] DecodeKey(string keyBase64)
     {
         if (string.IsNullOrWhiteSpace(keyBase64))
-            throw new ArgumentException("Chiave mancante.", nameof(keyBase64));
+            throw new CryptoException("Chiave mancante.");
 
         byte[] key;
         try { key = Convert.FromBase64String(keyBase64); }
-        catch (FormatException) { throw new ArgumentException("Chiave non in formato Base64 valido.", nameof(keyBase64)); }
+        catch (FormatException) { throw new CryptoException("Chiave non in formato Base64 valido."); }
 
         if (key.Length != KeySizeBytes)
-            throw new ArgumentException($"Chiave non valida: attesi {KeySizeBytes} byte, ricevuti {key.Length}.", nameof(keyBase64));
+            throw new CryptoException($"Chiave non valida: attesi {KeySizeBytes} byte, ricevuti {key.Length}.");
 
         return key;
     }

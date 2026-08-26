@@ -7,10 +7,8 @@ builder.Services.AddCryptoRateLimiting();
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
+app.UseApiErrorHandling();
+app.UseDevelopmentApiDocs();
 
 app.UseHttpsRedirection();
 app.UseRateLimiter();
