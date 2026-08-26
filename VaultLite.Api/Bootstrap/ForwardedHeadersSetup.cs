@@ -17,6 +17,6 @@ public static class ForwardedHeadersSetup
         options.KnownIPNetworks.Clear();
         options.KnownProxies.Clear();
 
-        app.UseForwardedHeaders(options);
+        app.UseForwardedHeaders(options);  
     }
 }
