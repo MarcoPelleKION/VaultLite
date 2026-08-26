@@ -8,6 +8,7 @@ builder.Services.AddCryptoRateLimiting();
 var app = builder.Build();
 
 app.UseApiErrorHandling();
+app.UseProxyForwardedHeaders();
 app.UseApiDocs();
 
 app.UseHttpsRedirection();
