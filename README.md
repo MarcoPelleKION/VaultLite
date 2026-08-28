@@ -193,7 +193,7 @@ public static class AesGcmCrypto
 
 ## 6. Frontend
 
-Pagina statica singola (`wwwroot/index.html`, vanilla JS, nessun framework), servita direttamente dalla stessa applicazione ASP.NET Core: stesso dominio dell'API, nessun CORS da configurare, un solo artefatto da deployare.
+Pagina statica singola (`wwwroot/index.html` + `css/site.css` + `js/app.js`, JS vanilla, styling con Bootstrap via CDN), servita direttamente dalla stessa applicazione ASP.NET Core: stesso dominio dell'API, nessun CORS da configurare, un solo artefatto da deployare.
 
 Funzionalità della pagina:
 
@@ -216,7 +216,11 @@ VaultLite.Api/
     CryptoException.cs              -> unica eccezione "safe to expose" dal dominio crypto
     CryptoRequest.cs                -> record del body JSON (Key, Value)
   wwwroot/
-    index.html                      -> Frontend statico
+    index.html                      -> Frontend statico (markup, Bootstrap via CDN)
+    css/
+      site.css                      -> Stili custom applicativi
+    js/
+      app.js                        -> Logica frontend (fetch verso /key, /encrypt, /decrypt)
 ```
 
 ## 8. Stack tecnologico
@@ -226,7 +230,7 @@ VaultLite.Api/
 | Framework      | .NET 10 / ASP.NET Core                                               |
 | API            | Minimal API, route group unico                                       |
 | Crittografia   | AES-256-GCM (`System.Security.Cryptography`, incluso nel framework)  |
-| Frontend       | HTML/CSS/JS vanilla, servito da `wwwroot` (static files middleware)  |
+| Frontend       | HTML/JS vanilla + Bootstrap (CDN), servito da `wwwroot` (static files middleware) |
 | Persistenza    | Nessuna — app stateless                                              |
 
 Nessun pacchetto NuGet esterno richiesto oltre a quelli di default del template `webapi`.

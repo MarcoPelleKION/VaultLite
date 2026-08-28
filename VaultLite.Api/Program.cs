@@ -12,6 +12,8 @@ app.UseProxyForwardedHeaders();
 app.UseApiDocs();
 
 app.UseHttpsRedirection();
+app.UseDefaultFiles();
+app.UseStaticFiles();
 app.UseRateLimiter();
 
 app.MapCryptoEndpoints();
